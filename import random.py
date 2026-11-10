@@ -15,6 +15,7 @@ BASE_INTERVAL = 6.0
 MAX_CUSTOMER = 12
 BASE_PATIENCE = 45
 USE_ANSI = True
+frame = 0 
 
 class Cafe:
     def __init__(self):
@@ -30,7 +31,24 @@ class Cafe:
             return(round(self.prices[key] * SPECIAL_DISCOUNT))
         return(self.prices[key])
 
+def itemline(cafe, key):
+    text = f"|{key}. {MENU_NAMES[key]} - {cafe.priceof(key)} Sand Grains  x{cafe.stock[key]}"
+    if cafe.stock[key] == 0:                      # stock for this key is 0
+        text += " [SOLD OUT]"
+    if cafe.specialitems == key:                      # this key is the special
+        text += " *SPECIAL*"
+    return(text)
 
+
+def build_menu_left(cafe):
+    lines = [" WELCOME TO THE TERMINAL CAFE!!", "", " DRINKS:", ""]
+    drink_art = STEAM[frame % 2] +  CUP                 # steam picture plus CUP
+    drinks = sorted((n for n in MENU_NAMES if n > 2), key=int)            # keys whose CATEGORY is "drink"
+    for i, key in enumerate(drinks):
+        art = drink_art[art[i] if i < len(art) else ""]                            # drink_art[i], or "" if i is too big
+        lines.append(art.ljust(ART_W) + itemline(cafe, key))
+    # now do the same for edibles, with FOOD_ART
+    return lines
 
 def game():
     print("welcome to the terminal cafe!!")
@@ -45,3 +63,4 @@ def game():
 
 if __name__ == "__main__":
     game()
+
