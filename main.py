@@ -264,7 +264,7 @@ def customerrow(cust):
     p3 = st.ljust(9) + " "
     p4 = n_str.ljust(20)
     
-    final_arr = [p1, p2, p3, p4, " ", mtr]
+    final_arr = [p1, p2, p3, p4, "   ", mtr]
     return "".join(final_arr)
 
 def draw(cafe):
@@ -273,7 +273,7 @@ def draw(cafe):
 
     print("\n" * 100, end="")
     L = buildmenuleft(cafe)
-    R = [" customers:", ""]
+    R = ["customers:       status:   items:                 patience:  ", ""]
 
     for m in cafe['log']:
         R.append(" > " + m)

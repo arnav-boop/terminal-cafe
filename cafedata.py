@@ -59,8 +59,8 @@ customerlabels = "abcdefghijklmnoprstuvwxyz"            # the keys you press; no
 
 #art
 steamframes = [
-    [r"    ) (", r"   ( ) )", r"   ) ( ("],
-    [r"    ( )", r"   ) ( (", r"   ( ) )"],
+    [r"      ) (", r"     ( ) )", r"    ) ( ("],
+    [r"      ( )", r"      ) ( (", r"     ( ) )"],
 ]
 cupascii = [
     r"  (_______)_",
