@@ -1,173 +1,382 @@
 import random
 import time
-import msvcrt 
-from cafedata import MENU_NAMES, MENU_PREP, BASE_PRICES, CATEGORY, CUSTOMER_NAMES, LABELS, STEAM, CUP, FOOD_ART, SPINNER, highscore
-from collections import deque
+import msvcrt
+import math
+import sys
 
+from cafedata import *
 
-#settings
-DAYS = 7
+TOTAL_DAYS = 7
 START_MONEY = 150
 START_STOCK = 6
-SPECIAL_DISCOUNT = 0.7
+SPECIAL_DISCSNT = 0.7
+
 ART_W = 24
-LEFT_W = 84
+L_PANEL_W = 84
 DAY_SECONDS = 90
-BASE_INTERVAL = 6.0
-MAX_CUSTOMER = 12
-BASE_PATIENCE = 45
-USE_ANSI = True
-frame = 0 
+AVG_CUST_DELAY = 6.0
 
-class Cafe:
-    def __init__(self):
-        self.money = START_MONEY
-        self.stock = {k: START_STOCK for k in MENU_NAMES}
-        self.day = 1
-        self.rep = 50
-        self.prices = dict(BASE_PRICES)
-        self.specialitems = None
-        self.start_day()           
+MAX_CUSTS = 12
+DEFAULT_PATIENCE = 45
 
-    def arrivalrate(self):
-        base =  1 / BASE_INTERVAL
-        factor = 0.5 + self.rep / 100
-        return(base * factor)   
+ansiuseable = True
+frameCounter = 0
 
-    def freelabel(self):
-        used = {c.label for c in self.customers}
-        for letters in LABELS:
-            if letters not in used:
-                return letters
+def startday(c):
+    c['elapsed'] = 0.0
+    c['customers'] = []
+    c['log'] = []
+    c['served'] = 0
+    c['walked'] = 0
+    c['revenue'] = 0
 
-        return None
+def setupcafe():
+    d = {}
+    d['money'] = START_MONEY
+    d['stock'] = {}
+    d['day'] = 1
+    d['rep'] = 50
+    d['prices'] = itemprice.copy()
+    d['specialitems'] = None
+    d['cooks'] = 2
+    
+    for k in itemsfromthemenu:
+        d['stock'][k] = START_STOCK
+        
+    startday(d)
+    return d
 
-    def say(self, text):
-        self.log.append(text)
+def busycooks(cafeRef):
+    x = 0
+    for cust in cafeRef['customers']:
+        if cust['state'] == 'cooking':
+            x += 1
+    return x
 
-    def walkout(self, c):
-        self.rep = max(0, self.rep - 4)      # max keeps rep from going below 0
-        self.walked += 1                   # one more customer lost
-        self.customers.remove(c)
-        self.say(f"{c.name} got tired of waiting and left!")
+def startcooking(cafeData, targetLabel):
+    for c in cafeData['customers']:
+        if c['label'] == targetLabel:
+            if c['state'] == 'cooking': 
+                return 'this order is already cooking'
+            if busycooks(cafeData) >= cafeData['cooks']: 
+                return 'no free cook right now!'
+                
+            # Check if we have stock for every item in the order
+            for item in c['items']:
+                if cafeData['stock'].get(item, 0) <= 0:
+                    return f"Out of {itemsfromthemenu[item]}!"
+            
+            # Deduct stock
+            for item in c['items']:
+                cafeData['stock'][item] -= 1
 
-    def step(self, dt):
-        self.elapsed += dt
-    # 1. maybe a customer arrives
-        if self.elapsed < DAY_SECONDS - 12 and random.random() < self.arrivalrate() * dt:       # dice roll from idea 2
-            self.spawncust()
-    # 2. patience drains for everyone
-        for c in list(self.customers):
-             c.patience_left -= dt
-             if c.patience_left <= 0:                                       # patience has run out
-                 self.walkout(c)
+            c['state'] = 'cooking'
+            c['cookleft'] = float(c['prep'])
+            return ''
+    return ''
 
-    def popularity(self,key):
-        return((25/ BASE_PRICES[key]) ** 0.5)
+def say(cRef, msg):
+    cRef['log'].append(msg)
+    if len(cRef['log']) > 3: 
+        cRef['log'].pop(0)
 
-    def spawncust(self):
-        label = self.freelabel()
-        if label is None or len(self.customers) >= MAX_CUSTOMER:
-            return
-        count = random.choices([1,2,3], weights=[5,4,1])[0]
-        keys = list(MENU_NAMES)
-        weights = [self.popularity(key) for key in keys]
-        items = random.choices(keys, weights=weights, k=count)
-        price = sum(self.priceof(k) for k in items)
-        prep = sum(MENU_PREP[k] for k in items)
-        name = random.choice(CUSTOMER_NAMES)
-        self.customers.append(Customer(label, name, items, BASE_PATIENCE, price, prep))
+def serve(cDict, cObj):
+    p = cObj['price']
+    cDict['money'] += p
+    cDict['revenue'] = cDict['revenue'] + p
+    cDict['served'] += 1
+    cDict['rep'] = min(100, cDict['rep'] + 1)
+    cDict['customers'].remove(cObj)
+    
+    # print("serving " + cObj['name'])
+    say(cDict, cObj['name'] + ' paid ' + str(p) + ' sand grains!')
 
+def arrivalrate(c):
+    baseRate = 1 / AVG_CUST_DELAY
+    repFactor = 0.5 + c['rep'] / 100
+    return baseRate * repFactor
 
-    def priceof(self, key):
-        if self.specialitems == key:
-            return(round(self.prices[key] * SPECIAL_DISCOUNT))
-        return(self.prices[key])
+def freelabel(cafeDict):
+    used_labels = []
+    for c in cafeDict['customers']:
+        used_labels.append(c['label'])
+        
+    for ltr in customerlabels:
+        if ltr not in used_labels:
+            return ltr
+            
+    return None
 
-    def start_day(self):
-        self.elapsed = 0.0
-        self.customers = []
-        self.log = deque(maxlen=3)
-        self.served = 0
-        self.walked = 0
-        self.revenue = 0
+def walkout(cafe, cust):
+    cafe['rep'] = max(0, cafe['rep'] - 4)
+    cafe['walked'] += 1
+    cafe['customers'].remove(cust)
+    say(cafe, cust['name'] + " got tired of waiting and left! :(")
 
+def step(cafe, dt):
+    cafe['elapsed'] += dt
+    
+    if cafe['elapsed'] < DAY_SECONDS - 12:
+        if random.random() < arrivalrate(cafe) * dt:
+            spawncust(cafe)
 
+    temp_list = []
+    for c in cafe['customers']:
+        temp_list.append(c)
+        
+    for c in temp_list:
+        c['patienceleft'] -= dt
+        
+        if c['state'] == 'cooking':
+            c['cookleft'] -= dt
+            if c['cookleft'] <= 0:
+                serve(cafe, c)
+                continue
+                
+        if c['patienceleft'] <= 0:
+            walkout(cafe, c)
 
+def priceof(cafe, item):
+    cst = cafe['prices'][item]
+    if cafe['specialitems'] == item:
+        cst = int(cst * SPECIAL_DISCSNT)
+    return cst
 
-def itemline(cafe, key):
-    text = f"|{key}. {MENU_NAMES[key]} - {cafe.priceof(key)} Sand Grains  x{cafe.stock[key]}"
-    if cafe.stock[key] == 0:                      # stock for this key is 0
-        text += " [SOLD OUT]"
-    if cafe.specialitems == key:                      # this key is the special
-        text += " *SPECIAL*"
-    return(text)
+def spawncust(cafe):
+    if len(cafe['customers']) >= MAX_CUSTS: 
+        return
+        
+    lbl = freelabel(cafe)
+    if lbl == None: 
+        return
 
-def draw(cafe):
-    global frame
-    frame += 1
-    print("\n"* 1000)
+    sz = random.randint(1, 3)
+    keys = list(itemsfromthemenu.keys())
+    
+    chosen = []
+    for i in range(sz):
+        chosen.append(random.choice(keys))
 
-    for line in build_menu_left(cafe):
-        print(line)
-    print("")
-    print(f"day: {cafe.day}  sand grains: {cafe.money} rep: {cafe.rep}/100")
-    print("ctrl c to stop")
+    tp = 0
+    tprep = 0
+    for it in chosen:
+        tp = tp + priceof(cafe, it)
+        tprep += preptimeforitem[it]
+        
+    nm = random.choice(customers)
 
-def build_menu_left(cafe):
-    lines = [" WELCOME TO THE TERMINAL CAFE!!", "", " DRINKS:", ""]
+    nc = {
+        'label': lbl,
+        'name': nm,
+        'items': chosen,
+        'patiencemax': DEFAULT_PATIENCE,
+        'patienceleft': DEFAULT_PATIENCE,
+        'price': tp,
+        'prep': tprep,
+        'state': 'waiting',
+        'cookleft': 0.0
+    }
+    cafe['customers'].append(nc)
 
-    drink_art = STEAM[frame % 2] +  CUP                 # steam picture plus CUP
-    drinks = sorted((n for n in MENU_NAMES if int(n) <= 9), key=int)        # keys whose CATEGORY is "drink"
-    for i, key in enumerate(drinks):
-        art = drink_art[i] if i < len(drink_art) else ""                            # drink_art[i], or "" if i is too big
-        lines.append(art.ljust(ART_W) + itemline(cafe, key))
-    # now do the same for edibles, with FOOD_ART
-    food_art = FOOD_ART
-    lines += ["", ""]
-    food = sorted((n for n in MENU_NAMES if int(n) > 9), key = int) 
-    for i, key in enumerate(food):
-        art = food_art[i] if i < len(food_art) else ""
-        lines.append(art.ljust(ART_W) + itemline(cafe, key))
+def itemline(cafe, k):
+    nm = itemsfromthemenu[k]
+    cst = priceof(cafe, k)
+    stk = cafe['stock'][k]
+    
+    s = '|' + k + '. ' + nm + ' - ' + str(cst) + ' sand Grains  x' + str(stk)
+    if stk == 0:
+        s += ' [sold out]'
+    if cafe['specialitems'] == k:
+        s += ' *special*'
+        
+    return s
+
+def buildmenuleft(c):
+    lines = [' welcome to the terminal cafe!!', '', ' drinks:', '']
+    
+    idx = (frameCounter // 15) % len(steamframes)
+    art = steamframes[idx] + cupascii
+
+    bev = []
+    for k in itemsfromthemenu:
+        if int(k) <= 9:
+            bev.append(k)
+    bev.sort(key=int)
+
+    for i in range(len(bev)):
+        a = ''
+        if i < len(art):
+            a = art[i]
+        lines.append(a.ljust(ART_W) + itemline(c, bev[i]))
+
+    lines.extend(['', ''])
+    
+    meals = []
+    for item in itemsfromthemenu:
+        if int(item) > 9:
+            meals.append(item)
+    meals.sort(key=int)
+
+    for i in range(len(meals)):
+        pic = ''
+        if i < len(pizzaascii):
+            pic = pizzaascii[i]
+        lines.append(pic.ljust(ART_W) + itemline(c, meals[i]))
+
     return lines
 
-class Customer:
-    def __init__(self, label, name, items, patience, price, prep):
-        self.patience_max = patience
-        self.patience_left = patience
-        self.label = label
-        self.name = name
-        self.items = items
-        self.prep = prep
-        self.price = price
-        self.state = "waiting"
-        self.cook_left = 0.0
+def customerrow(cust):
+    if cust['state'] == 'waiting':
+        st = 'waiting'
+    else:
+        sp = cookingloader[frameCounter % len(cookingloader)]
+        st = sp + ' ' + str(math.ceil(cust['cookleft'])) + 's'
 
+    rt = cust['patienceleft'] / cust['patiencemax']
+    bl = int((10 * rt) + 0.5)
+    
+    if bl < 0: 
+        bl = 0
+    elif bl > 10: 
+        bl = 10
+        
+    bar_data = ['.'] * 10
+    for j in range(bl):
+        bar_data[j] = '#'
+        
+    mtr = ''.join(bar_data)
 
-def test():
-    cafe = Cafe()
-    for _ in range(360):          # 360 ticks x 0.25 seconds = 90 seconds
-        cafe.step(0.25)
-    print(cafe.elapsed, len(cafe.customers), cafe.walked, cafe.rep)
-    print(list(cafe.log))
+    items_arr = []
+    for x in cust['items']:
+        items_arr.append(itemsfromthemenu[x])
+    
+    n_str = ''
+    for y in range(len(items_arr)):
+        n_str += items_arr[y]
+        if y < len(items_arr) - 1:
+            n_str += ', '
+        
+    if len(n_str) > 20:
+        n_str = n_str[:17] + '...' 
+
+    p1 = "[{}] ".format(cust['label'])
+    p2 = "%-12s " % cust['name']
+    p3 = st.ljust(9) + " "
+    p4 = n_str.ljust(20)
+    
+    final_arr = [p1, p2, p3, p4, " ", mtr]
+    return "".join(final_arr)
+
+def draw(cafe):
+    global frameCounter
+    frameCounter+=1
+
+    print("\n" * 100, end="")
+    L = buildmenuleft(cafe)
+    R = [" customers:", ""]
+
+    for m in cafe['log']:
+        R.append(" > " + m)
+        
+    while len(R) < 5:
+        R.append("")
+
+    for cust in cafe['customers']:
+        R.append(customerrow(cust))
+
+    max_l = len(L)
+    if len(R) > max_l: 
+        max_l = len(R)
+    
+    for i in range(max_l):
+        l_str = ""
+        r_str = ""
+        if i < len(L): l_str = L[i]
+        if i < len(R): r_str = R[i]
+        
+        print(l_str.ljust(L_PANEL_W) + " | " + r_str)
+
+    print("")
+    print("day: " + str(cafe['day']) + "  sand grains: " + str(cafe['money']) + "  rep: " + str(cafe['rep']) + "/100")
+    print("press the order letter to cook, space to pause, q to quit.")
+
+def pollkey():
+    if not msvcrt.kbhit():
+        return None
+    k = msvcrt.getch()
+    if k in (b"\x00", b"\xe0"):
+        msvcrt.getch()
+        return None
+    return k.decode("utf-8", errors="ignore").lower()
+
+def runday(cafe):
+    paused = 0
+    prevTime = time.time()
+
+    while cafe['elapsed'] < DAY_SECONDS:
+        curTime = time.time()
+        deltaT = curTime - prevTime
+        prevTime = curTime
+
+        if deltaT > 0.5:
+            deltaT = 0.5
+
+        keyInput = pollkey()
+        
+        if keyInput == 'q':
+            return 'quit'
+        elif keyInput == ' ':
+            if paused == 0:
+                paused = 1
+            else:
+                paused = 0
+        elif keyInput and paused == 0:
+            res = startcooking(cafe, keyInput)
+            if res: 
+                say(cafe, res)
+
+        if paused == 0:
+            step(cafe, deltaT)
+
+        draw(cafe)
+        time.sleep(0.03)
+
+    return 'done'
 
 def game():
-    print("welcome to the terminal cafe!!")
-    print(f"The current high score is {highscore}")
-    cafe = Cafe()
+    print('welcome to the terminal cafe!!')
+    print('the current high score is ' + str(highscore))
 
-    cafe.stock["1"] = 0
-    cafe.specialitems = "3"
+    c = setupcafe()
+    
+    # testing
+    c['stock']['1'] = 0
+    c['specialitems'] = '3'
 
+    while c['day'] <= TOTAL_DAYS:
+        out = runday(c)
+        
+        if out == 'quit': 
+            sys.exit() # changed to sys.exit so it looks weird
+
+        print('\nday finished!')
+        print('customers served: ' + str(c['served']))
+        print('customers walked out: ' + str(c['walked']))
+        print('today\'s revenue: ' + str(c['revenue']))
+        print('total money: ' + str(c['money']))
+
+        if c['day'] == TOTAL_DAYS:
+            print('\nYOU SURVIVED 7 DAYS! VICTORY!!')
+            break
+
+        input('\npress ENTER to start the next day...')
+        c['day'] += 1
+        startday(c)
+
+    print('\nthanks for playing terminal cafe!, nandri vanakkam')
+
+if __name__ == '__main__':
     try:
-        while True:
-            draw(cafe)
-            time.sleep(0.5)
-
+        game()
     except KeyboardInterrupt:
-        print("\n bye!!")
-
-
-if __name__ == "__main__":
-    test()
-
+        print("Game stopped.")

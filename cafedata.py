@@ -1,4 +1,4 @@
-MENU_NAMES = {
+itemsfromthemenu = {
     "1": "Coffee",
     "2": "Boba", 
     "3": "Apple Juice", 
@@ -16,7 +16,7 @@ MENU_NAMES = {
     "15": "Waffles", 
     "16": "Cake",
 }
-BASE_PRICES = {
+itemprice = {
     "1": 20, 
     "2": 30, 
     "3": 15, 
@@ -34,8 +34,7 @@ BASE_PRICES = {
     "15": 30, 
     "16": 25,
 }
-# seconds one cook needs to make one of each item
-MENU_PREP = {
+preptimeforitem = {
     "1": 4, 
     "2": 5, 
     "3": 2, 
@@ -53,17 +52,17 @@ MENU_PREP = {
     "15": 10, 
     "16": 9,
 }
-CATEGORY = {k: ("drink" if int(k) <= 9 else "edible") for k in MENU_NAMES}
-CUSTOMER_NAMES = ["Nona", "Pearl", "Bitten", "Bite", "Groot", "Moss", "Tiggy",     # [P2] new
+category = {k: ("drink" if int(k) <= 9 else "edible") for k in itemsfromthemenu}
+customers = ["Nona", "Pearl", "Bitten", "Bite", "Groot", "Moss", "Tiggy",     # [P2] new
                   "Juno", "Pipe", "Rock", "Echoes", "Mango", "Wafflemaker", "Chloe", "Dota", "Fizz"]
-LABELS = "abcdefghijklmnoprstuvwxyz"            # the keys you press; no q (quit)
+customerlabels = "abcdefghijklmnoprstuvwxyz"            # the keys you press; no q (quit)
 
 #art
-STEAM = [
+steamframes = [
     [r"    ) (", r"   ( ) )", r"   ) ( ("],
     [r"    ( )", r"   ) ( (", r"   ( ) )"],
 ]
-CUP = [
+cupascii = [
     r"  (_______)_",
     r" .-'---------|",
     r"( C|/\/\/\/\/|",
@@ -71,7 +70,7 @@ CUP = [
     r"  '_________'",
     r"   '-------'",
 ]
-FOOD_ART = [
+pizzaascii = [
    "EDIBLES: ",  
     "",
     r'//""--.._',
@@ -81,6 +80,14 @@ FOOD_ART = [
     r' \\__..--""',
     "",
 ]
-SPINNER = "|/-\\"                                                 # [P2] new
+cookingloader = "|/-\\"                                                 # [P2] new
 
 highscore = 0
+
+
+
+
+
+
+
+
