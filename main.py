@@ -88,7 +88,6 @@ def serve(cDict, cObj):
     cDict['rep'] = min(100, cDict['rep'] + 1)
     cDict['customers'].remove(cObj)
     
-    # print("serving " + cObj['name'])
     say(cDict, cObj['name'] + ' paid ' + str(p) + ' sand grains!')
 
 def arrivalrate(c):
@@ -147,15 +146,18 @@ def spawncust(cafe):
         return
         
     lbl = freelabel(cafe)
-    if lbl == None: 
+    if lbl is None: 
+        return
+
+    # Only pick from items that currently have stock > 0
+    available_keys = [k for k, stk in cafe['stock'].items() if stk > 0]
+    if not available_keys:
         return
 
     sz = random.randint(1, 3)
-    keys = list(itemsfromthemenu.keys())
-    
     chosen = []
     for i in range(sz):
-        chosen.append(random.choice(keys))
+        chosen.append(random.choice(available_keys))
 
     tp = 0
     tprep = 0
@@ -273,7 +275,7 @@ def draw(cafe):
 
     print("\n" * 100, end="")
     L = buildmenuleft(cafe)
-    R = ["customers:       status:   items:                 patience:  ", ""]
+    R = ["customers:     status:   items:                   patience:  ", ""]
 
     for m in cafe['log']:
         R.append(" > " + m)
@@ -309,6 +311,13 @@ def pollkey():
         return None
     return k.decode("utf-8", errors="ignore").lower()
 
+def closingtime(cafe):
+    for c in list(cafe['customers']):
+        cafe['rep'] = max(0, cafe['rep'] - 1)
+        cafe['walked'] += 1
+        say(cafe, f"{c['name']} had to leave as the cafe closed")
+    cafe['customers'] = []
+
 def runday(cafe):
     paused = 0
     prevTime = time.time()
@@ -341,23 +350,93 @@ def runday(cafe):
         draw(cafe)
         time.sleep(0.03)
 
+    closingtime(cafe)
+    draw(cafe)
+    time.sleep(1.0)
+
     return 'done'
+
+def nightshop(cafe):
+    print("\n" * 500)
+    print("========================================")
+    print(f"        END OF DAY {cafe['day']} SUMMARY")
+    print("========================================")
+    print(f" customers served      :  {cafe['served']}")
+    print(f" customers walked out  :  {cafe['walked']}")
+    print(f" today's revenue       :  {cafe['revenue']} sand grains")
+    print(f" total money           :  {cafe['money']} sand grains")
+    print(f" reputation            :  {cafe['rep']}/100")
+    print("----------------------------------------")
+
+    print(" SPOILAGE REPORT:")
+    for k in cafe['stock']:
+        spoiled = math.floor(cafe['stock'][k] * 0.3)
+        cafe['stock'][k] -= spoiled
+        if spoiled > 0:
+            print(f" - {itemsfromthemenu[k]}: {spoiled} lost to spoilage")
+
+    rent = 100 + 100 * (cafe['day'] - 1)
+    cafe['money'] -= rent
+    print("----------------------------------------")
+    print(f" rent paid             : {rent} sand grains")
+    print(f" balance after rent    : {cafe['money']} sand grains")
+    print("========================================")
+
+    if cafe['money'] < 0:
+        print("\n Magga you went bankrupt! Game Over.")
+        return "bankrupt"
+    if cafe['rep'] <= 0:
+        print('\n Deiii your shop\'s rep hit the floor! Game Over.')
+        return "bankrupt"
+
+    if cafe['day'] == TOTAL_DAYS:
+        return "victory"
+
+    input("\n Press ENTER to open nightshop and restock...")
+
+    while True:
+        print("\n---- NIGHT SUPPLIES SHOP ----")
+        print(f"Your money: {cafe['money']} sand grains")
+        print("1. Buy stock (costs 60% of base price)")
+        print("2. Continue to next day")
+        choice = input("Select option 1 or 2: ").strip()
+
+        if choice == '1':
+            print("\nMenu items:")
+            for k, name in itemsfromthemenu.items():
+                cost = round(itemprice[k] * 0.6)
+                print(f"[{k}] {name} - {cost} sand grains (stock: {cafe['stock'][k]})")
+            item_choice = input("Enter item number to buy (or press ENTER to go back): ").strip()
+            if item_choice in cafe['stock']:
+                cost = round(itemprice[item_choice] * 0.6)
+                qty_str = input(f"How many {itemsfromthemenu[item_choice]}s to buy? ").strip()
+                if qty_str.isdigit():
+                    qty = int(qty_str)
+                    total_cost = cost * qty
+                    if cafe['money'] >= total_cost:
+                        cafe['money'] -= total_cost
+                        cafe['stock'][item_choice] += qty
+                        print(f"Bought {qty} {itemsfromthemenu[item_choice]} for {total_cost} sand grains!")
+                    else:
+                        print("Not enough sand grains!")
+            time.sleep(1.0)
+        elif choice == "2":
+            break
+
+    return "continue"
 
 def game():
     print('welcome to the terminal cafe!!')
     print('the current high score is ' + str(highscore))
 
     c = setupcafe()
-    
-    # testing
-    c['stock']['1'] = 0
     c['specialitems'] = '3'
 
     while c['day'] <= TOTAL_DAYS:
         out = runday(c)
         
         if out == 'quit': 
-            sys.exit() # changed to sys.exit so it looks weird
+            sys.exit()
 
         print('\nday finished!')
         print('customers served: ' + str(c['served']))
@@ -365,11 +444,15 @@ def game():
         print('today\'s revenue: ' + str(c['revenue']))
         print('total money: ' + str(c['money']))
 
-        if c['day'] == TOTAL_DAYS:
+        input('\npress ENTER to see the night summary...')
+
+        result = nightshop(c)
+        if result == "bankrupt":
+            break
+        if result == "victory":
             print('\nYOU SURVIVED 7 DAYS! VICTORY!!')
             break
 
-        input('\npress ENTER to start the next day...')
         c['day'] += 1
         startday(c)
 
