@@ -29,6 +29,11 @@ def startday(c):
     c['served'] = 0
     c['walked'] = 0
     c['revenue'] = 0
+    c['specialitems'] = random.choice(list(itemsfromthemenu.keys()))
+    c['rushtimer'] = 0.0
+    c['critic'] = False
+    c['eventtriggered'] = False                                        
+
 
 def setupcafe():
     d = {}
@@ -112,17 +117,39 @@ def walkout(cafe, cust):
     cafe['customers'].remove(cust)
     say(cafe, cust['name'] + " got tired of waiting and left! :(")
 
+def triggerevent(cafe):
+    events = [
+        ("Rush Hour! Customers are flooding in!", lambda c: c.update({'rushtimer': 15.0})),
+        ("Food Critic visiting today! Rep changes are doubled!", lambda c: c.update({'critic': True}))
+    ]
+    # Pick a random event
+    msg, action = random.choice(events)
+    say(cafe, f"EVENT: {msg}")
+    action(cafe)
+                #                             
+
+    
+
 def step(cafe, dt):
     cafe['elapsed'] += dt
-    
+
+    # Trigger a random event halfway through the day
+    if 40 <= cafe['elapsed'] <= 45 and not cafe.get('eventtriggered', False):
+        cafe['eventtriggered'] = True
+        triggerevent(cafe)
+
+    # Handle rush hour timer
+    rate_multiplier = 2.0 if cafe.get('rushtimer', 0.0) > 0 else 1.0
+    if cafe.get('rushtimer', 0.0) > 0:
+        cafe['rushtimer'] -= dt
+
     if cafe['elapsed'] < DAY_SECONDS - 12:
-        if random.random() < arrivalrate(cafe) * dt:
+        if random.random() < (arrivalrate(cafe) * rate_multiplier) * dt:
             spawncust(cafe)
 
-    temp_list = []
-    for c in cafe['customers']:
-        temp_list.append(c)
-        
+    autochef(cafe)
+
+    temp_list = list(cafe['customers'])
     for c in temp_list:
         c['patienceleft'] -= dt
         
@@ -133,7 +160,9 @@ def step(cafe, dt):
                 continue
                 
         if c['patienceleft'] <= 0:
-            walkout(cafe, c)
+            walkout(cafe, c)                                                                                                                                                                                        #                             #             
+
+
 
 def priceof(cafe, item):
     cst = cafe['prices'][item]
@@ -318,6 +347,18 @@ def closingtime(cafe):
         say(cafe, f"{c['name']} had to leave as the cafe closed")
     cafe['customers'] = []
 
+def autochef(cafe):
+    while busycooks(cafe) < cafe['cooks']:
+        waiting_custs = [c for c in cafe['customers'] if c['state'] == 'waiting']
+        if not waiting_custs:
+            break
+        # Priority: Pick the customer running out of patience the fastest
+        waiting_custs.sort(key=lambda x: x['patienceleft'])
+        target = waiting_custs[0]
+        startcooking(cafe, target['label'])
+                                #                                         
+
+
 def runday(cafe):
     paused = 0
     prevTime = time.time()
@@ -398,15 +439,17 @@ def nightshop(cafe):
         print("\n---- NIGHT SUPPLIES SHOP ----")
         print(f"Your money: {cafe['money']} sand grains")
         print("1. Buy stock (costs 60% of base price)")
-        print("2. Continue to next day")
-        choice = input("Select option 1 or 2: ").strip()
+        print(f"2. Hire Extra Cook (Cost: 300) [Current cooks: {cafe['cooks']}]")
+        print("3. Adjust Menu Prices (Markup multiplier)")
+        print("4. Continue to next day")
+        choice = input("Select option (1-4): ").strip()
 
         if choice == '1':
             print("\nMenu items:")
             for k, name in itemsfromthemenu.items():
                 cost = round(itemprice[k] * 0.6)
                 print(f"[{k}] {name} - {cost} sand grains (stock: {cafe['stock'][k]})")
-            item_choice = input("Enter item number to buy (or press ENTER to go back): ").strip()
+            item_choice = input("Enter item number to buy (or ENTER to go back): ").strip()
             if item_choice in cafe['stock']:
                 cost = round(itemprice[item_choice] * 0.6)
                 qty_str = input(f"How many {itemsfromthemenu[item_choice]}s to buy? ").strip()
@@ -416,12 +459,41 @@ def nightshop(cafe):
                     if cafe['money'] >= total_cost:
                         cafe['money'] -= total_cost
                         cafe['stock'][item_choice] += qty
-                        print(f"Bought {qty} {itemsfromthemenu[item_choice]} for {total_cost} sand grains!")
+                        print(f"Bought {qty} {itemsfromthemenu[item_choice]}!")
                     else:
                         print("Not enough sand grains!")
             time.sleep(1.0)
-        elif choice == "2":
-            break
+
+        elif choice == '2':
+            cook_cost = 300
+            if cafe['money'] >= cook_cost:
+                cafe['money'] -= cook_cost
+                cafe['cooks'] += 1
+                print(f"Hired an extra cook! Total cooks: {cafe['cooks']}")
+            else:
+                print("Not enough sand grains to hire a cook!")
+            time.sleep(1.0)
+
+        elif choice == '3':
+            print("\n--- PRICE ADJUSTMENT ---")
+            print("Enter new price multiplier (e.g. 1.0 for normal, 1.2 for 20% higher, 0.8 for discount):")
+            mult_str = input("Multiplier (0.6 to 1.5): ").strip()
+            try:
+                mult = float(mult_str)
+                if 0.6 <= mult <= 1.5:
+                    for k in cafe['prices']:
+                        cafe['prices'][k] = round(itemprice[k] * mult)
+                    print(f"Prices updated with multiplier {mult}x!")
+                else:
+                    print("Multiplier must be between 0.6 and 1.5!")
+            except ValueError:
+                print("Invalid number!")
+            time.sleep(1.0)
+
+        elif choice == '4':
+            break                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            
+
+
 
     return "continue"
 
