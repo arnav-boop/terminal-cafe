@@ -13,7 +13,7 @@
 - and most importantly, coookkk as fast as you can
 
 ## how to run it
-1. download terminalcafe.exe
+1. download terminal cafe.exe
 2. double click the file to launch the game in a windows terminal
 3. in the same folder itll save highscore.txt to save your scores
 
