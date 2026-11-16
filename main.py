@@ -3,6 +3,9 @@ import time
 import msvcrt
 import math
 import sys
+import os
+import winsound
+import threading
 
 from cafedata import *
 
@@ -10,17 +13,41 @@ TOTAL_DAYS = 7
 START_MONEY = 150
 START_STOCK = 6
 SPECIAL_DISCSNT = 0.7
-
 ART_W = 24
 L_PANEL_W = 84
 DAY_SECONDS = 90
 AVG_CUST_DELAY = 6.0
-
 MAX_CUSTS = 12
 DEFAULT_PATIENCE = 45
 
 ansiuseable = True
 frameCounter = 0
+
+highscore = 0 # global
+
+def load_hi():
+    fn = "highscore.txt"
+    if not os.path.exists(fn):
+        return 0
+        
+    f = open(fn, "r")
+    data = f.read()
+    f.close()
+    
+    try:
+        return int(data)
+    except:
+        return 0
+
+def save_hi(s):
+    try:
+        old = load_hi()
+        if s > old:
+            f = open("highscore.txt", "w")
+            f.write(str(s))
+            f.close()
+    except:
+        pass
 
 def startday(c):
     c['elapsed'] = 0.0
@@ -32,8 +59,10 @@ def startday(c):
     c['specialitems'] = random.choice(list(itemsfromthemenu.keys()))
     c['rushtimer'] = 0.0
     c['critic'] = False
-    c['eventtriggered'] = False                                        
-
+    c['eventtriggered'] = False
+    c['chef_msg'] = ""
+    c['chef_timer'] = 10.0
+    c['auto_cooldown'] = 30.0 # auto chef needs a break sometimes
 
 def setupcafe():
     d = {}
@@ -52,26 +81,30 @@ def setupcafe():
     return d
 
 def busycooks(cafeRef):
-    x = 0
+    cnt = 0
     for cust in cafeRef['customers']:
         if cust['state'] == 'cooking':
-            x += 1
-    return x
+            cnt += 1
+    return cnt
 
 def startcooking(cafeData, targetLabel):
     for c in cafeData['customers']:
         if c['label'] == targetLabel:
             if c['state'] == 'cooking': 
                 return 'this order is already cooking'
+                
             if busycooks(cafeData) >= cafeData['cooks']: 
                 return 'no free cook right now!'
                 
-            # Check if we have stock for every item in the order
+            # check stock
+            x = 0
             for item in c['items']:
                 if cafeData['stock'].get(item, 0) <= 0:
-                    return f"Out of {itemsfromthemenu[item]}!"
+                    return "out of " + itemsfromthemenu[item] + "!"
+                else:
+                    x = x + 1
             
-            # Deduct stock
+            # deduct stock
             for item in c['items']:
                 cafeData['stock'][item] -= 1
 
@@ -82,7 +115,7 @@ def startcooking(cafeData, targetLabel):
 
 def say(cRef, msg):
     cRef['log'].append(msg)
-    if len(cRef['log']) > 3: 
+    while len(cRef['log']) > 3:
         cRef['log'].pop(0)
 
 def serve(cDict, cObj):
@@ -93,64 +126,69 @@ def serve(cDict, cObj):
     cDict['rep'] = min(100, cDict['rep'] + 1)
     cDict['customers'].remove(cObj)
     
-    say(cDict, cObj['name'] + ' paid ' + str(p) + ' sand grains!')
+    say(cDict, cObj['name'] + " paid " + str(p) + " sand grains!")
 
 def arrivalrate(c):
-    baseRate = 1 / AVG_CUST_DELAY
-    repFactor = 0.5 + c['rep'] / 100
-    return baseRate * repFactor
+    a = 1 / AVG_CUST_DELAY
+    b = 0.5 + c['rep'] / 100
+    return a * b
 
 def freelabel(cafeDict):
-    used_labels = []
+    used = []
     for c in cafeDict['customers']:
-        used_labels.append(c['label'])
+        used.append(c['label'])
         
     for ltr in customerlabels:
-        if ltr not in used_labels:
+        if ltr not in used:
             return ltr
             
     return None
 
 def walkout(cafe, cust):
     cafe['rep'] = max(0, cafe['rep'] - 4)
-    cafe['walked'] += 1
+    cafe['walked'] = cafe['walked'] + 1
     cafe['customers'].remove(cust)
-    say(cafe, cust['name'] + " got tired of waiting and left! :(")
+    say(cafe, "%s got tired of waiting and left! :(" % cust['name'])
 
-def triggerevent(cafe):
-    events = [
-        ("Rush Hour! Customers are flooding in!", lambda c: c.update({'rushtimer': 15.0})),
-        ("Food Critic visiting today! Rep changes are doubled!", lambda c: c.update({'critic': True}))
-    ]
-    # Pick a random event
-    msg, action = random.choice(events)
-    say(cafe, f"EVENT: {msg}")
-    action(cafe)
-                #                             
-
-    
+def do_event(cafe):
+    r = random.randint(1, 2)
+    if r == 1:
+        say(cafe, "event: rush hour! customers are flooding in!")
+        cafe['rushtimer'] = 15.0
+    else:
+        say(cafe, "event: food critic visiting today! rep changes are doubled!")
+        cafe['critic'] = True
 
 def step(cafe, dt):
     cafe['elapsed'] += dt
 
-    # Trigger a random event halfway through the day
-    if 40 <= cafe['elapsed'] <= 45 and not cafe.get('eventtriggered', False):
-        cafe['eventtriggered'] = True
-        triggerevent(cafe)
+    if cafe['chef_timer'] > 0:
+        cafe['chef_timer'] -= dt
+        
+    if cafe['auto_cooldown'] > 0:
+        cafe['auto_cooldown'] -= dt
 
-    # Handle rush hour timer
-    rate_multiplier = 2.0 if cafe.get('rushtimer', 0.0) > 0 else 1.0
-    if cafe.get('rushtimer', 0.0) > 0:
+    # trigger event
+    if cafe['elapsed'] >= 40:
+        if cafe['elapsed'] <= 45:
+            if cafe['eventtriggered'] == False:
+                cafe['eventtriggered'] = True
+                do_event(cafe)
+
+    # rush hour
+    mult = 1.0
+    if cafe['rushtimer'] > 0:
+        mult = 2.0
         cafe['rushtimer'] -= dt
 
     if cafe['elapsed'] < DAY_SECONDS - 12:
-        if random.random() < (arrivalrate(cafe) * rate_multiplier) * dt:
+        if random.random() < (arrivalrate(cafe) * mult) * dt:
             spawncust(cafe)
 
     autochef(cafe)
 
-    temp_list = list(cafe['customers'])
-    for c in temp_list:
+    temp_l = list(cafe['customers'])
+    for c in temp_l:
         c['patienceleft'] -= dt
         
         if c['state'] == 'cooking':
@@ -160,33 +198,34 @@ def step(cafe, dt):
                 continue
                 
         if c['patienceleft'] <= 0:
-            walkout(cafe, c)                                                                                                                                                                                        #                             #             
-
-
+            walkout(cafe, c)
 
 def priceof(cafe, item):
-    cst = cafe['prices'][item]
+    p = cafe['prices'][item]
     if cafe['specialitems'] == item:
-        cst = int(cst * SPECIAL_DISCSNT)
-    return cst
+        p = int(p * SPECIAL_DISCSNT)
+    return p
 
 def spawncust(cafe):
     if len(cafe['customers']) >= MAX_CUSTS: 
         return
         
     lbl = freelabel(cafe)
-    if lbl is None: 
+    if lbl == None: 
         return
 
-    # Only pick from items that currently have stock > 0
-    available_keys = [k for k, stk in cafe['stock'].items() if stk > 0]
-    if not available_keys:
+    avail = []
+    for k in cafe['stock']:
+        if cafe['stock'][k] > 0:
+            avail.append(k)
+            
+    if not avail:
         return
 
     sz = random.randint(1, 3)
     chosen = []
     for i in range(sz):
-        chosen.append(random.choice(available_keys))
+        chosen.append(random.choice(avail))
 
     tp = 0
     tprep = 0
@@ -214,16 +253,17 @@ def itemline(cafe, k):
     cst = priceof(cafe, k)
     stk = cafe['stock'][k]
     
-    s = '|' + k + '. ' + nm + ' - ' + str(cst) + ' sand Grains  x' + str(stk)
+    s = "|" + k + ". " + nm + " - " + str(cst) + " sand grains  x" + str(stk)
     if stk == 0:
-        s += ' [sold out]'
+        s += " [sold out]"
+        
     if cafe['specialitems'] == k:
-        s += ' *special*'
+        s += " *special*"
         
     return s
 
 def buildmenuleft(c):
-    lines = [' welcome to the terminal cafe!!', '', ' drinks:', '']
+    lines = [" welcome to the terminal cafe!!", "", " drinks:", ""]
     
     idx = (frameCounter // 15) % len(steamframes)
     art = steamframes[idx] + cupascii
@@ -235,12 +275,12 @@ def buildmenuleft(c):
     bev.sort(key=int)
 
     for i in range(len(bev)):
-        a = ''
+        a = ""
         if i < len(art):
             a = art[i]
         lines.append(a.ljust(ART_W) + itemline(c, bev[i]))
 
-    lines.extend(['', ''])
+    lines.extend(["", ""])
     
     meals = []
     for item in itemsfromthemenu:
@@ -249,7 +289,7 @@ def buildmenuleft(c):
     meals.sort(key=int)
 
     for i in range(len(meals)):
-        pic = ''
+        pic = ""
         if i < len(pizzaascii):
             pic = pizzaascii[i]
         lines.append(pic.ljust(ART_W) + itemline(c, meals[i]))
@@ -261,7 +301,7 @@ def customerrow(cust):
         st = 'waiting'
     else:
         sp = cookingloader[frameCounter % len(cookingloader)]
-        st = sp + ' ' + str(math.ceil(cust['cookleft'])) + 's'
+        st = sp + " " + str(math.ceil(cust['cookleft'])) + "s"
 
     rt = cust['patienceleft'] / cust['patiencemax']
     bl = int((10 * rt) + 0.5)
@@ -271,38 +311,37 @@ def customerrow(cust):
     elif bl > 10: 
         bl = 10
         
-    bar_data = ['.'] * 10
-    for j in range(bl):
-        bar_data[j] = '#'
-        
-    mtr = ''.join(bar_data)
+    # make the meter
+    mtr = ".........."
+    for i in range(bl):
+        mtr = mtr[:i] + "#" + mtr[i+1:]
 
     items_arr = []
     for x in cust['items']:
         items_arr.append(itemsfromthemenu[x])
     
-    n_str = ''
+    n_str = ""
     for y in range(len(items_arr)):
         n_str += items_arr[y]
         if y < len(items_arr) - 1:
-            n_str += ', '
+            n_str += ", "
         
     if len(n_str) > 20:
-        n_str = n_str[:17] + '...' 
+        n_str = n_str[:17] + "..." 
 
-    p1 = "[{}] ".format(cust['label'])
-    p2 = "%-12s " % cust['name']
+    p1 = "[" + cust['label'] + "] "
+    p2 = cust['name'].ljust(12) + " "
     p3 = st.ljust(9) + " "
-    p4 = n_str.ljust(20)
+    p4 = n_str.ljust(20) + "   "
     
-    final_arr = [p1, p2, p3, p4, "   ", mtr]
-    return "".join(final_arr)
+    return p1 + p2 + p3 + p4 + mtr
 
 def draw(cafe):
     global frameCounter
-    frameCounter+=1
+    frameCounter += 1
 
-    print("\n" * 100, end="")
+    sys.stdout.write("\033[2J\033[1;1H")
+    
     L = buildmenuleft(cafe)
     R = ["customers:     status:   items:                   patience:  ", ""]
 
@@ -330,6 +369,24 @@ def draw(cafe):
     print("")
     print("day: " + str(cafe['day']) + "  sand grains: " + str(cafe['money']) + "  rep: " + str(cafe['rep']) + "/100")
     print("press the order letter to cook, space to pause, q to quit.")
+    
+    # indicators
+    if cafe['chef_timer'] > 0:
+        print("  >> " + cafe['chef_msg'] + " <<")
+    else:
+        if busycooks(cafe) < cafe['cooks']:
+            wait_count = 0
+            for c in cafe['customers']:
+                if c['state'] == 'waiting':
+                    wait_count += 1
+                    
+            if wait_count > 0:
+                if cafe['auto_cooldown'] > 0:
+                    print("  >> auto-chef is resting (" + str(round(cafe['auto_cooldown'], 1)) + "s). your turn to cook! <<")
+                else:
+                    print("  >> [action] cooks are free! press a letter to cook! <<")
+                
+    sys.stdout.flush()
 
 def pollkey():
     if not msvcrt.kbhit():
@@ -344,23 +401,45 @@ def closingtime(cafe):
     for c in list(cafe['customers']):
         cafe['rep'] = max(0, cafe['rep'] - 1)
         cafe['walked'] += 1
-        say(cafe, f"{c['name']} had to leave as the cafe closed")
+        say(cafe, c['name'] + " had to leave as the cafe closed")
     cafe['customers'] = []
 
 def autochef(cafe):
-    while busycooks(cafe) < cafe['cooks']:
-        waiting_custs = [c for c in cafe['customers'] if c['state'] == 'waiting']
-        if not waiting_custs:
-            break
-        # Priority: Pick the customer running out of patience the fastest
-        waiting_custs.sort(key=lambda x: x['patienceleft'])
-        target = waiting_custs[0]
-        startcooking(cafe, target['label'])
-                                #                                         
+    if cafe['auto_cooldown'] > 0:
+        return
+        
+    tried_labels = []
 
+    while True:
+        if busycooks(cafe) >= cafe['cooks']:
+            break
+            
+        target = None
+        low = 9999
+        for c in cafe['customers']:
+            if c['state'] == 'waiting':
+                if c['label'] in tried_labels:
+                    continue
+                    
+                if c['patienceleft'] < low:
+                    low = c['patienceleft']
+                    target = c
+                    
+        if target == None:
+            break
+            
+        result = startcooking(cafe, target['label'])
+        
+        if result != "":
+            tried_labels.append(target['label'])
+        else:
+            cafe['chef_msg'] = "auto-chef cooked " + target['name'] + "'s order!"
+            cafe['chef_timer'] = 2.0
+            cafe['auto_cooldown'] = 4.0 # 4 second break
+            break 
 
 def runday(cafe):
-    paused = 0
+    p_flag = False
     prevTime = time.time()
 
     while cafe['elapsed'] < DAY_SECONDS:
@@ -376,20 +455,23 @@ def runday(cafe):
         if keyInput == 'q':
             return 'quit'
         elif keyInput == ' ':
-            if paused == 0:
-                paused = 1
+            if p_flag == False:
+                p_flag = True
             else:
-                paused = 0
-        elif keyInput and paused == 0:
+                p_flag = False
+        elif keyInput and p_flag == False:
             res = startcooking(cafe, keyInput)
             if res: 
                 say(cafe, res)
+            else:
+                cafe['chef_msg'] = "you manually started cooking!"
+                cafe['chef_timer'] = 2.0
 
-        if paused == 0:
+        if p_flag == False:
             step(cafe, deltaT)
 
         draw(cafe)
-        time.sleep(0.03)
+        time.sleep(0.05)
 
     closingtime(cafe)
     draw(cafe)
@@ -400,68 +482,72 @@ def runday(cafe):
 def nightshop(cafe):
     print("\n" * 500)
     print("========================================")
-    print(f"        END OF DAY {cafe['day']} SUMMARY")
+    print("        end of day " + str(cafe['day']) + " summary")
     print("========================================")
-    print(f" customers served      :  {cafe['served']}")
-    print(f" customers walked out  :  {cafe['walked']}")
-    print(f" today's revenue       :  {cafe['revenue']} sand grains")
-    print(f" total money           :  {cafe['money']} sand grains")
-    print(f" reputation            :  {cafe['rep']}/100")
+    print(" customers served      :  " + str(cafe['served']))
+    print(" customers walked out  :  " + str(cafe['walked']))
+    print(" today's revenue       :  " + str(cafe['revenue']) + " sand grains")
+    print(" total money           :  " + str(cafe['money']) + " sand grains")
+    print(" reputation            :  " + str(cafe['rep']) + "/100")
     print("----------------------------------------")
 
-    print(" SPOILAGE REPORT:")
+    print(" spoilage report:")
     for k in cafe['stock']:
-        spoiled = math.floor(cafe['stock'][k] * 0.3)
-        cafe['stock'][k] -= spoiled
-        if spoiled > 0:
-            print(f" - {itemsfromthemenu[k]}: {spoiled} lost to spoilage")
+        sp = math.floor(cafe['stock'][k] * 0.3)
+        cafe['stock'][k] -= sp
+        if sp > 0:
+            print(" - " + itemsfromthemenu[k] + ": " + str(sp) + " lost to spoilage")
 
     rent = 100 + 100 * (cafe['day'] - 1)
     cafe['money'] -= rent
     print("----------------------------------------")
-    print(f" rent paid             : {rent} sand grains")
-    print(f" balance after rent    : {cafe['money']} sand grains")
+    print(" rent paid             : " + str(rent) + " sand grains")
+    print(" balance after rent    : " + str(cafe['money']) + " sand grains")
     print("========================================")
 
     if cafe['money'] < 0:
-        print("\n Magga you went bankrupt! Game Over.")
+        print("\n magga you went bankrupt! game over.")
         return "bankrupt"
+        
     if cafe['rep'] <= 0:
-        print('\n Deiii your shop\'s rep hit the floor! Game Over.')
+        print("\n deiii your shop's rep hit the floor! game over.")
         return "bankrupt"
 
     if cafe['day'] == TOTAL_DAYS:
         return "victory"
 
-    input("\n Press ENTER to open nightshop and restock...")
+    input("\n press enter to open nightshop and restock...")
 
     while True:
-        print("\n---- NIGHT SUPPLIES SHOP ----")
-        print(f"Your money: {cafe['money']} sand grains")
-        print("1. Buy stock (costs 60% of base price)")
-        print(f"2. Hire Extra Cook (Cost: 300) [Current cooks: {cafe['cooks']}]")
-        print("3. Adjust Menu Prices (Markup multiplier)")
-        print("4. Continue to next day")
-        choice = input("Select option (1-4): ").strip()
+        print("\n---- night supplies shop ----")
+        print("your money: " + str(cafe['money']) + " sand grains")
+        print("1. buy stock (costs 60% of base price)")
+        print("2. hire extra cook (cost: 300) [current cooks: " + str(cafe['cooks']) + "]")
+        print("3. adjust menu prices (markup multiplier)")
+        print("4. continue to next day")
+        choice = input("select option (1-4): ").strip()
 
         if choice == '1':
-            print("\nMenu items:")
+            print("\nmenu items:")
             for k, name in itemsfromthemenu.items():
                 cost = round(itemprice[k] * 0.6)
-                print(f"[{k}] {name} - {cost} sand grains (stock: {cafe['stock'][k]})")
-            item_choice = input("Enter item number to buy (or ENTER to go back): ").strip()
+                print("[" + str(k) + "] " + name + " - " + str(cost) + " sand grains (stock: " + str(cafe['stock'][k]) + ")")
+                
+            item_choice = input("enter item number to buy (or enter to go back): ").strip()
+            
             if item_choice in cafe['stock']:
                 cost = round(itemprice[item_choice] * 0.6)
-                qty_str = input(f"How many {itemsfromthemenu[item_choice]}s to buy? ").strip()
+                qty_str = input("how many " + itemsfromthemenu[item_choice] + "s to buy? ").strip()
+                
                 if qty_str.isdigit():
                     qty = int(qty_str)
                     total_cost = cost * qty
                     if cafe['money'] >= total_cost:
-                        cafe['money'] -= total_cost
+                        cafe['money'] = cafe['money'] - total_cost
                         cafe['stock'][item_choice] += qty
-                        print(f"Bought {qty} {itemsfromthemenu[item_choice]}!")
+                        print("bought " + str(qty) + " " + itemsfromthemenu[item_choice] + "!")
                     else:
-                        print("Not enough sand grains!")
+                        print("not enough sand grains!")
             time.sleep(1.0)
 
         elif choice == '2':
@@ -469,37 +555,75 @@ def nightshop(cafe):
             if cafe['money'] >= cook_cost:
                 cafe['money'] -= cook_cost
                 cafe['cooks'] += 1
-                print(f"Hired an extra cook! Total cooks: {cafe['cooks']}")
+                print("hired an extra cook! total cooks: " + str(cafe['cooks']))
             else:
-                print("Not enough sand grains to hire a cook!")
+                print("not enough sand grains to hire a cook!")
             time.sleep(1.0)
 
         elif choice == '3':
-            print("\n--- PRICE ADJUSTMENT ---")
-            print("Enter new price multiplier (e.g. 1.0 for normal, 1.2 for 20% higher, 0.8 for discount):")
-            mult_str = input("Multiplier (0.6 to 1.5): ").strip()
+            print("\n--- price adjustment ---")
+            print("enter new price multiplier (e.g. 1.0 for normal, 1.2 for 20% higher, 0.8 for discount):")
+            mult_str = input("multiplier (0.6 to 1.5): ").strip()
             try:
                 mult = float(mult_str)
-                if 0.6 <= mult <= 1.5:
+                if mult >= 0.6 and mult <= 1.5:
                     for k in cafe['prices']:
                         cafe['prices'][k] = round(itemprice[k] * mult)
-                    print(f"Prices updated with multiplier {mult}x!")
+                    print("prices updated with multiplier " + str(mult) + "x!")
                 else:
-                    print("Multiplier must be between 0.6 and 1.5!")
+                    print("multiplier must be between 0.6 and 1.5!")
             except ValueError:
-                print("Invalid number!")
+                print("invalid number!")
             time.sleep(1.0)
 
         elif choice == '4':
-            break                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            
-
-
+            break
+        else:
+            print("invalid choice") 
+            time.sleep(0.5)
 
     return "continue"
 
+def play_sfx(f, d):
+    def run():
+        try:
+            winsound.Beep(f, d)
+        except RuntimeError:
+            pass
+    t = threading.Thread(target=run)
+    t.daemon = True
+    t.start()
+
+def titlescreen(ch):
+    while True:
+        print("\n" * 50)
+        print("=========================================")
+        print("          the terminal cafe              ")
+        print("=========================================")
+        print(" current high score : " + str(ch) + " sand grains")
+        print("-----------------------------------------")
+        print(" [s] start game")
+        print(" [q] quit")
+        print("=========================================")
+        choice = input("select option: ").lower().strip() 
+        
+        if choice == 's':
+            play_sfx(1000, 150)
+            break
+        elif choice == 'q':
+            sys.exit(0)
+        else:
+            print("wrong key")
+            time.sleep(0.5)
+
 def game():
-    print('welcome to the terminal cafe!!')
-    print('the current high score is ' + str(highscore))
+    global highscore
+    highscore = load_hi()
+    
+    # random debug variable
+    debug_mode = False
+
+    titlescreen(highscore)
 
     c = setupcafe()
     c['specialitems'] = '3'
@@ -508,30 +632,37 @@ def game():
         out = runday(c)
         
         if out == 'quit': 
-            sys.exit()
+            sys.exit(0)
 
         print('\nday finished!')
         print('customers served: ' + str(c['served']))
         print('customers walked out: ' + str(c['walked']))
-        print('today\'s revenue: ' + str(c['revenue']))
+        print("today's revenue: " + str(c['revenue']))
         print('total money: ' + str(c['money']))
 
-        input('\npress ENTER to see the night summary...')
+        input('\npress enter to see the night summary...')
 
-        result = nightshop(c)
-        if result == "bankrupt":
+        res = nightshop(c)
+        
+        if res == "bankrupt":
+            play_sfx(200, 400)
             break
-        if result == "victory":
-            print('\nYOU SURVIVED 7 DAYS! VICTORY!!')
+            
+        if res == "victory":
+            play_sfx(1200, 300)
+            print('\nyou survived 7 days! victory!!')
             break
 
         c['day'] += 1
         startday(c)
 
+    save_hi(c['money'])
+    
+    print("\nfinal score: " + str(c['money']) + " sand grains")
     print('\nthanks for playing terminal cafe!, nandri vanakkam')
 
 if __name__ == '__main__':
     try:
         game()
     except KeyboardInterrupt:
-        print("Game stopped.")
+        print("game stopped.")
