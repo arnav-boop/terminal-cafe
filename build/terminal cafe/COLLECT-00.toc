@@ -198,4 +198,7 @@
    'BINARY'),
   ('unicodedata.pyd',
    'C:\\Users\\Arnav\\AppData\\Local\\Programs\\Python\\Python311\\DLLs\\unicodedata.pyd',
+   'EXTENSION'),
+  ('winsound.pyd',
+   'C:\\Users\\Arnav\\AppData\\Local\\Programs\\Python\\Python311\\DLLs\\winsound.pyd',
    'EXTENSION')],)
